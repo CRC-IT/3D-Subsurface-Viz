@@ -7,13 +7,13 @@ import pandas as pd
 import plotly.graph_objs as go
 import pyodbc
 from dash.dependencies import Input, Output, State
-import flask
 import itertools
-"""
+r"""
 James refactor September 2019
 
 pip install pandas, dash, dash_bootstrap_components, pyodbc
 Copied csv files to local repo directory, gitignore points.csv
+pip install C:\Users\scarborj\Documents\GitHub\3D-Subsurface-Viz\pyproj-2.2.2-cp36-cp36m-win_amd64.whl
 """
 
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.LUX])
@@ -78,7 +78,7 @@ mapbox_access_token = 'pk.eyJ1Ijoia3dvbm0iLCJhIjoiY2p4MHk0NTlhMDF4bjN6bnp6bm8xcm
 
 WELLBORE = pd.read_csv('data/borehole.csv')  # BLKENG_BOREHOLE_QUERY
 WELLCOMP = pd.read_csv('data/comp.csv')  # BLKENG_COMPL_DF
-WELLPATH = pd.read_csv('data/points.csv')  # INITIAL_QUERY
+WELLPATH = pd.read_csv('data/points.csv', low_memory=False)  # INITIAL_QUERY
 INITIAL = WELLPATH[WELLPATH['WELL_COMMON_NAME'].isin(['B748', 'B623', 'D716', 'B634', 'B737', 'B748', 'B706', 'D719', 'B739', 'B568', 'A303', 'A307', 'D748'])]
 STARTUP = True
 #INITIAL = WELLPATH ### Crashes. --James
@@ -218,41 +218,55 @@ def plot_3d_wellbore(wellbore_df, fault=None):
             traces.extend(add_fault(i))
     return traces
 
+import pyproj
+def unproject(df, epsg=26799):
+    proj = pyproj.Proj(init=f'epsg:{epsg}')
+    lonlats = [proj(x, y, inverse=True) for x, y in df.values]
+    return pd.DataFrame(lonlats, columns=['LONGITUDE', 'LATITUDE'])
 
-def generate_well_map(df):
-    grouped = df.groupby('WELL_COMMON_NAME')
-    well_long = np.concatenate(grouped['LONGITUDE'].unique(), axis=0)
-    well_lat = np.concatenate(grouped['LATITUDE'].unique(), axis=0)
-    project_name = np.concatenate(grouped['PROJECT_NAME'].unique(), axis=0)
-    well_index = grouped['PROJECT_NAME'].unique().index
+def plot_2d_map(df):
+    """Regular map in MapBox"""
+    grouped = df.groupby('WELL_COMMON_NAME').first()
+    wellpath = unproject(df[['MAP_EASTING', 'MAP_NORTHING']])
+    welltops = unproject(grouped[['MAP_EASTING', 'MAP_NORTHING']])
+    data = [
+        go.Scattermapbox(
+            lat=welltops['LATITUDE'],
+            lon=welltops['LONGITUDE'],
+            mode='markers',
+            marker=dict(size=7,
+                        color='red'),
+            text=grouped.index,
+            hoverinfo='text',
+            showlegend=False
+            ),
+        go.Scattermapbox(
+            lat=wellpath['LATITUDE'],
+            lon=wellpath['LONGITUDE'],
+            mode='markers',
+            marker=dict(size=1,
+                        color='#f542f2',
+                        opacity=0.5),
+            hoverinfo='none',
+            showlegend=False
+            )
+        ]
+    return data
 
-    data = [go.Scattermapbox(
-        lat=well_lat,
-        lon=well_long,
-        mode="markers",
-        marker=dict(size=7,
-                    color='red'
-                    ),
-        text=project_name + '<br>' + well_index
-        # can add name,
-        # selected points = index
-        # custom data)
-    )]
 
-    layout = go.Layout(
-        autosize=True,
-        hovermode='closest',
-        mapbox=go.layout.Mapbox(
-            accesstoken=mapbox_access_token,
-            bearing=0,
-            pitch=0,
-            zoom=15,
-            center=go.layout.mapbox.Center(lat=33.76004, lon=-118.18054)),
-        height=700
-    )
-
-    return {'data': data, 'layout': layout}
-
+maplayout = go.Layout(
+    margin=dict(l=0, r=0, t=0, b=0),
+    autosize=True,
+    hovermode='closest',
+    mapbox=go.layout.Mapbox(
+        accesstoken=mapbox_access_token,
+        bearing=0,
+        pitch=0,
+        zoom=11,
+        center=dict(lat=33.75, lon=-118.17)
+        ),
+    height=200
+)
 
 # Color dictionary for markers, same marker gets the same color
 markers = ['A', 'AA', 'AB', 'AC', 'AD', 'AE', 'AI', 'AM', 'AO', 'AR', 'AU',
@@ -357,13 +371,19 @@ body = dbc.Container([
                          placeholder='Select Faults',
                          multi=True,
                          options=[{'label': k, 'value': v}
-                                  for k, v in faults.items()])
+                                  for k, v in faults.items()]),
+            html.Br(),
+            html.H4('Location Map'),
+            dcc.Graph(id='surface viz',
+                      figure=dict(data=plot_2d_map(INITIAL),
+                                  layout=maplayout)
+                      ),
             ], width=3),
         dbc.Col([
             html.H3('Subsurface Map'),
             dcc.Graph(id='subsurface viz',
-                      figure={'data': plot_3d_wellbore(INITIAL),
-                              'layout': layout},
+                      figure=dict(data=plot_3d_wellbore(INITIAL),
+                                  layout=layout)
                       ),
             ], width=9)
         ])
@@ -434,20 +454,20 @@ def return_incomplete_wells(well_selection, incompletes):
 
 # Update graph and well_map upon user selection changes
 @app.callback(
-    Output('subsurface viz', 'figure'),
-    #Output('well_map', 'figure')],
+    [Output('subsurface viz', 'figure'),
+     Output('surface viz', 'figure')],
     [Input('wells', 'value'),
      Input('incompletes', 'value'),
      Input('faults', 'value')],
-    [State('subsurface viz', 'figure')]
+    [State('subsurface viz', 'figure'),
+     State('surface viz', 'figure')]
 )
-def update_3d_graph(well_names, incomplete_wells, fault, figure):
+def update_3d_graph(well_names, incomplete_wells, fault, subsurface, surface):
     global STARTUP
     if STARTUP:
-        figure['data'] = plot_3d_wellbore(INITIAL)
+        "Already rendered above"
         STARTUP = False
     else:
-        well_names = well_names or []
         new_well_names = list(WELLBORE[WELLBORE['wellid'].isin(well_names)]['NEW_WELL_NAME'])
         new_well_names.extend(incomplete_wells)
         # placeholders = ','.join('?' for i in range(len(new_well_names)))
@@ -475,8 +495,9 @@ def update_3d_graph(well_names, incomplete_wells, fault, figure):
         # df = pd.read_sql(SMP_QUERY, cnxn, params = new_well_names)
 
         df = WELLPATH[WELLPATH['NEW_WELL_NAME'].isin(new_well_names)]
-        figure['data'] = plot_3d_wellbore(df, fault)
-    return figure
+        subsurface['data'] = plot_3d_wellbore(df, fault)
+        surface['data'] = plot_2d_map(df)
+    return subsurface, surface
 
 
 if __name__ == '__main__':
