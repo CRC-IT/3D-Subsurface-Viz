@@ -11,8 +11,8 @@ import itertools
 r"""
 James refactor September 2019
 
-pip install pandas, dash, dash_bootstrap_components, pyodbc
 Copied csv files to local repo directory, gitignore points.csv
+pip install pandas, dash, dash_bootstrap_components, pyodbc
 pip install C:\Users\scarborj\Documents\GitHub\3D-Subsurface-Viz\pyproj-2.2.2-cp36-cp36m-win_amd64.whl
 """
 
@@ -80,7 +80,6 @@ WELLBORE = pd.read_csv('data/borehole.csv')  # BLKENG_BOREHOLE_QUERY
 WELLCOMP = pd.read_csv('data/comp.csv')  # BLKENG_COMPL_DF
 WELLPATH = pd.read_csv('data/points.csv', low_memory=False)  # INITIAL_QUERY
 INITIAL = WELLPATH[WELLPATH['WELL_COMMON_NAME'].isin(['B748', 'B623', 'D716', 'B634', 'B737', 'B748', 'B706', 'D719', 'B739', 'B568', 'A303', 'A307', 'D748'])]
-STARTUP = True
 #INITIAL = WELLPATH ### Crashes. --James
 
 
@@ -255,6 +254,7 @@ def plot_2d_map(df):
 
 
 maplayout = go.Layout(
+    height=200,
     margin=dict(l=0, r=0, t=0, b=0),
     autosize=True,
     hovermode='closest',
@@ -263,10 +263,7 @@ maplayout = go.Layout(
         bearing=0,
         pitch=0,
         zoom=11,
-        center=dict(lat=33.75, lon=-118.17)
-        ),
-    height=200
-)
+        center=dict(lat=33.75, lon=-118.17)))
 
 # Color dictionary for markers, same marker gets the same color
 markers = ['A', 'AA', 'AB', 'AC', 'AD', 'AE', 'AI', 'AM', 'AO', 'AR', 'AU',
@@ -317,7 +314,8 @@ faults = {'LBU': 'LBU FLT',
           'Daisy B2': 'DAISY AVE-B2 FLT'}
 
 layout = go.Layout(
-    height=700, margin=dict(l=0, r=20, t=20, b=0),
+    height=700,
+    margin=dict(l=0, r=20, t=20, b=0),
     scene=dict(
         xaxis=dict(
             title='X (Easting)',
@@ -358,10 +356,10 @@ body = dbc.Container([
             html.Div('Select Well'),
             dcc.Dropdown(id='wells',
                          placeholder='Select Wells',
-                         value=[],
+                         value='STARTUP',
                          multi=True),
             dcc.Markdown(
-                'Select checkboxes below to see correlated incomplete wells.'
+                'Select checkboxes below to see associated incomplete wells. '
                 'This checklist will generate only if applicable.'),
             dcc.Checklist(id='incompletes',
                           value=[],
@@ -463,10 +461,9 @@ def return_incomplete_wells(well_selection, incompletes):
      State('surface viz', 'figure')]
 )
 def update_3d_graph(well_names, incomplete_wells, fault, subsurface, surface):
-    global STARTUP
-    if STARTUP:
-        "Already rendered above"
-        STARTUP = False
+    if well_names == 'STARTUP':
+        "Already rendered above, then well_names gets a value"
+        pass
     else:
         new_well_names = list(WELLBORE[WELLBORE['wellid'].isin(well_names)]['NEW_WELL_NAME'])
         new_well_names.extend(incomplete_wells)
