@@ -2,85 +2,90 @@ import dash
 import dash_bootstrap_components as dbc
 import dash_core_components as dcc
 import dash_html_components as html
+from dash.dependencies import Input, Output, State
+import plotly.graph_objs as go
 import numpy as np
 import pandas as pd
-import plotly.graph_objs as go
 import pyodbc
-from dash.dependencies import Input, Output, State
 import itertools
+import pyproj
 r"""
-James refactor September 2019
+3D Visualization of the subsurface using Plotly and Dash
 
+Code by Mary Kwon, CRC Visualization Intern in Summer 2019
+Data engineering of LBU wellbore schema by Justin Clark
+Refactor by James Scarborough in September 2019
+
+Package install notes:
 Copied csv files to local repo directory, gitignore points.csv
 pip install pandas, dash, dash_bootstrap_components, pyodbc
-pip install C:\Users\scarborj\Documents\GitHub\3D-Subsurface-Viz\pyproj-2.2.2-cp36-cp36m-win_amd64.whl
+pip install ... GitHub\3D-Subsurface-Viz\pyproj-2.2.2-cp36-cp36m-win_amd64.whl
 """
-
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.LUX])
 app.title = '3D Viz'
+mapbox_access_token = 'pk.eyJ1Ijoia3dvbm0iLCJhIjoiY2p4MHk0NTlhMDF4bjN6bnp6bm8'\
+                      'xcmswOSJ9.OANG2d0eU8VCjsShWpccgQ'
+USE_FROZEN_DATA = False
 
-mapbox_access_token = 'pk.eyJ1Ijoia3dvbm0iLCJhIjoiY2p4MHk0NTlhMDF4bjN6bnp6bm8xcmswOSJ9.OANG2d0eU8VCjsShWpccgQ'
-# USE MARKDOWN FOR HTML
+if not USE_FROZEN_DATA:
+    server, database = 'CKCWBDA2', 'BDA_RWI'
+    # uid, pwd = 'BDA_READ', 'readonly'
+    cnxn = pyodbc.connect(
+        f'DRIVER={{ODBC Driver 17 for SQL Server}};'
+        f'SERVER={server};DATABASE={database};MARS_Connection=yes;'
+        # f'UID={uid};PWD={pwd};'
+        f'Trusted_Connection=yes;')
 
-# connect to DB server
-# server = 'CKCWBDA2'
-# database = 'BDA_RWI'
-# username = 'BDA_READ'
-# password = 'readonly'
-# cnxn = pyodbc.connect(
-#     'DRIVER={ODBC Driver 17 for SQL Server}; SERVER=' + server + '; DATABASE=' + database + '; UID=' + username + '; PWD=' + password + ';MARS_Connection=yes')
+    WELLBORE = pd.read_sql_query(
+        """SELECT
+            wellkey,
+            api_suffix,
+            wellid,
+            well_name,
+            well_redrill,
+            comp_flag,
+           CONCAT(wellkey, '_', api_suffix) as NEW_WELL_NAME
+           FROM [BDA_RWI].[dbo].[blkeng_borehole_v];""", cnxn)
 
-# BLKENG_BOREHOLE_QUERY = pd.read_sql_query(
-#     '''SELECT
-#         [wellkey],
-#         [api_suffix],
-#         [wellid],
-#         [well_name],
-#         [well_redrill],
-#         [comp_flag],
-#         CONCAT(wellkey,'_',api_suffix) as NEW_WELL_NAME
-#         FROM [BDA_RWI].[dbo].[blkeng_borehole_v]; ''', cnxn
-# )
-#
-# BLKENG_COMPL_DF = pd.read_sql_query(
-#     '''SELECT
-#         [well_name],
-#         [crb_desc],
-#         [cut_bk],
-#         [new_pool_desc],
-#         [well_redrill],
-#         CONCAT(well_name,well_redrill) as REDRILL_WELL_NAME
-#         FROM [BDA_RWI].[blkeng].[compl];''', cnxn
-# )
-#
-# INITIAL_QUERY = pd.read_sql_query(
-#             '''SELECT
-#                 [PROJECT_NAME],
-#                 [WELL_COMMON_NAME],
-#                 [API_SUFFIX],
-#                 [MD],
-#                 [TVDSS] * -1 as [TVDSS],
-#                 [MAP_NORTHING],
-#                 [MAP_EASTING],
-#                 [LATITUDE],
-#                 [LONGITUDE],
-#                 [mrkname] as [MRKNAME],
-#                 [top_perf] as [TOP_PERF],
-#                 [bot_perf] as [BOT_PERF],
-#                 [frac_flag] as [FRAC_FLAG],
-#                 [perf_status] [PERF_STATUS],
-#                 [SURVEY_DATE],
-#                 [perf_start_date] as [PERF_START_DATE],
-#                 CONCAT(WELL_COMMON_NAME,'_',API_SUFFIX) as NEW_WELL_NAME
-#                 FROM [BDA_RWI].[dbo].[surveys_markers_perfs_v] where [WELL_COMMON_NAME] in ('B748', 'B623', 'D716', 'B634', 'B737', 'B748', 'B706', 'D719', 'B739', 'B568', 'A303', 'A307', 'D748')
-#                  order by [MD] asc;''', cnxn
-# )
+    WELLCOMP = pd.read_sql_query(
+        """SELECT
+            well_name,
+            crb_desc,
+            cut_bk,
+            new_pool_desc,
+            well_redrill,
+           CONCAT(well_name, well_redrill) as REDRILL_WELL_NAME
+           FROM [BDA_RWI].[blkeng].[compl];""", cnxn)
 
-WELLBORE = pd.read_csv('data/borehole.csv')  # BLKENG_BOREHOLE_QUERY
-WELLCOMP = pd.read_csv('data/comp.csv')  # BLKENG_COMPL_DF
-WELLPATH = pd.read_csv('data/points.csv', low_memory=False)  # INITIAL_QUERY
-INITIAL = WELLPATH[WELLPATH['WELL_COMMON_NAME'].isin(['B748', 'B623', 'D716', 'B634', 'B737', 'B748', 'B706', 'D719', 'B739', 'B568', 'A303', 'A307', 'D748'])]
-#INITIAL = WELLPATH ### Crashes. --James
+    WELLPATH = pd.read_sql_query(
+        """SELECT
+            PROJECT_NAME,
+            WELL_COMMON_NAME,
+            API_SUFFIX,
+            MD,
+            TVDSS * -1 as TVDSS,
+            MAP_NORTHING,
+            MAP_EASTING,
+            LATITUDE,
+            LONGITUDE,
+            mrkname as MRKNAME,
+            top_perf as TOP_PERF,
+            bot_perf as BOT_PERF,
+            frac_flag as FRAC_FLAG,
+            perf_status PERF_STATUS,
+            SURVEY_DATE,
+            perf_start_date as PERF_START_DATE,
+           CONCAT(WELL_COMMON_NAME, '_', API_SUFFIX) as NEW_WELL_NAME
+           FROM [BDA_RWI].[dbo].[surveys_markers_perfs_v]
+           --WHERE WELL_COMMON_NAME in ('B748', 'B623', 'D716', 'B634', 'B737', 'B748', 'B706', 'D719', 'B739', 'B568', 'A303', 'A307', 'D748')
+           ORDER BY MD ASC;""", cnxn)
+else:
+    WELLBORE = pd.read_csv('data/borehole.csv')  # BLKENG_BOREHOLE_QUERY
+    WELLCOMP = pd.read_csv('data/comp.csv')  # BLKENG_COMPL_DF
+    WELLPATH = pd.read_csv('data/points.csv', low_memory=False) # INITIAL_QUERY
+DEFAULTS = ['B748', 'B623', 'D716', 'B634', 'B737', 'B748', 'B706', 'D719',
+            'B739', 'B568', 'A303', 'A307', 'D748']
+INITIAL = WELLPATH[WELLPATH['WELL_COMMON_NAME'].isin(DEFAULTS)]
 
 
 def clean(df):
@@ -98,12 +103,12 @@ def make_trace(well_name, df):
     """
     Plot well bore points
     """
-    well_coord = df[df['NEW_WELL_NAME'] == well_name]
-    x = well_coord['MAP_EASTING']
-    y = well_coord['MAP_NORTHING']
-    z = well_coord['TVDSS']
+    well_coord = df.loc[df['NEW_WELL_NAME'] == well_name]
+
     trace = go.Scatter3d(
-        x=x, y=y, z=z,
+        x=well_coord['MAP_EASTING'],
+        y=well_coord['MAP_NORTHING'],
+        z=well_coord['TVDSS'],
         mode='lines', line={'width': 3, 'color': '#f542f2'},
         name=well_name, legendgroup=well_name)
     return trace
@@ -129,7 +134,7 @@ def make_marker_trace(well_name, df):
         name=well_name + '<br>Markers',
         text=marker_index, textposition='middle right', textfont={'size': 10},
         legendgroup=well_name,
-        # hoverinfo='text',   <--------- gives only the text
+        # hoverinfo='text',   <- gives only the text
         showlegend=True)
     return trace
 
@@ -145,12 +150,10 @@ def make_perf_trace(well_name, df):
     perf_status_color = {'INACTIVE': '#f57b42', 'ACTIVE': 'green'}
     perf_clr = well_coord['PERF_STATUS'].map(perf_status_color)
 
-    x = well_coord['MAP_EASTING']
-    y = well_coord['MAP_NORTHING']
-    z = well_coord['TVDSS']
-
     trace = go.Scatter3d(
-        x=x, y=y, z=z,
+        x=well_coord['MAP_EASTING'],
+        y=well_coord['MAP_NORTHING'],
+        z=well_coord['TVDSS'],
         mode='markers',
         marker={'color': perf_clr, 'size': 5, 'symbol': 'diamond',
                 'opacity': 0.1},
@@ -182,7 +185,7 @@ def make_frac_trace(well_name, df):
         name=well_name + ' Fracs',
         text='Fracs: True<br>Marker: ' + well_coord['MRKNAME'],
         legendgroup='Fracs',
-        # hoverinfo = 'text',   <--------- gives only the text
+        # hoverinfo = 'text',   <- gives only the text
         showlegend=True)
     return trace
 
@@ -217,11 +220,13 @@ def plot_3d_wellbore(wellbore_df, fault=None):
             traces.extend(add_fault(i))
     return traces
 
-import pyproj
+
 def unproject(df, epsg=26799):
+    """Realtime unproject of State Plane XYs to Lat/Lon with datum shift"""
     proj = pyproj.Proj(init=f'epsg:{epsg}')
     lonlats = [proj(x, y, inverse=True) for x, y in df.values]
     return pd.DataFrame(lonlats, columns=['LONGITUDE', 'LATITUDE'])
+
 
 def plot_2d_map(df):
     """Regular map in MapBox"""
@@ -429,10 +434,9 @@ def return_well_options_from_crb(pool, crb):
         return []
     df = WELLCOMP[WELLCOMP['new_pool_desc'].str.contains(pool)]
     if crb:
-        well_names = df[df['cut_bk'].isin(crb)]['REDRILL_WELL_NAME'].str.strip()
-    else:
-        well_names = df['REDRILL_WELL_NAME'].str.strip()
-    return _options(well_names.unique())
+        df = df[df['cut_bk'].isin(crb)]
+    well_names = df['REDRILL_WELL_NAME'].str.strip().unique()
+    return _options(well_names)
 
 
 # Provide checklist of incomplete wells
@@ -449,6 +453,7 @@ def return_incomplete_wells(well_selection, incompletes):
     wells = list(compl_df['NEW_WELL_NAME'])
     wells = wells + incompletes
     return _options(wells)
+
 
 # Update graph and well_map upon user selection changes
 @app.callback(
@@ -487,8 +492,9 @@ def update_3d_graph(well_names, incomplete_wells, fault, subsurface, surface):
         #             [SURVEY_DATE],
         #             [perf_start_date] as [PERF_START_DATE],
         #             CONCAT(WELL_COMMON_NAME,'_',API_SUFFIX) as NEW_WELL_NAME
-        #             FROM [BDA_RWI].[dbo].[surveys_markers_perfs_v] where CONCAT(WELL_COMMON_NAME,'_',API_SUFFIX) in (%s) order by [MD] asc;''' % placeholders
-        #
+        #             FROM [BDA_RWI].[dbo].[surveys_markers_perfs_v]
+        #             WHERE CONCAT(WELL_COMMON_NAME,'_',API_SUFFIX) in (%s)
+        #             ORDER BY [MD] asc;''' % placeholders
         # df = pd.read_sql(SMP_QUERY, cnxn, params = new_well_names)
 
         df = WELLPATH[WELLPATH['NEW_WELL_NAME'].isin(new_well_names)]
