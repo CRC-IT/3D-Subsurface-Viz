@@ -1,14 +1,3 @@
-import dash
-import dash_bootstrap_components as dbc
-import dash_core_components as dcc
-import dash_html_components as html
-from dash.dependencies import Input, Output, State
-import plotly.graph_objs as go
-import numpy as np
-import pandas as pd
-import pyodbc
-import itertools
-import pyproj
 r"""
 3D Visualization of the subsurface using Plotly and Dash
 
@@ -21,11 +10,23 @@ Copied csv files to local repo directory, gitignore points.csv
 pip install pandas, dash, dash_bootstrap_components, pyodbc
 pip install ... GitHub\3D-Subsurface-Viz\pyproj-2.2.2-cp36-cp36m-win_amd64.whl
 """
+import dash
+import dash_bootstrap_components as dbc
+import dash_core_components as dcc
+import dash_html_components as html
+from dash.dependencies import Input, Output, State
+import plotly.graph_objs as go
+import numpy as np
+import pandas as pd
+import pyodbc
+import itertools
+import pyproj
+
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.LUX])
 app.title = '3D Viz'
 mapbox_access_token = 'pk.eyJ1Ijoia3dvbm0iLCJhIjoiY2p4MHk0NTlhMDF4bjN6bnp6bm8'\
                       'xcmswOSJ9.OANG2d0eU8VCjsShWpccgQ'
-USE_FROZEN_DATA = False
+USE_FROZEN_DATA = True
 
 if not USE_FROZEN_DATA:
     server, database = 'CKCWBDA2', 'BDA_RWI'
@@ -358,8 +359,13 @@ body = dbc.Container([
                          placeholder='Select CRB',
                          value=[],
                          multi=True),
+            dcc.Checklist(id='crbc',
+                          options=[{'label': 'Show all wells (takes a minute)',
+                                    'value': True}],
+                          value=[]),
             html.Div('Select Well'),
             dcc.Dropdown(id='wells',
+                         #style={'overflow': 'auto'},
                          placeholder='Select Wells',
                          value='STARTUP',
                          multi=True),
@@ -368,7 +374,8 @@ body = dbc.Container([
                 'This checklist will generate only if applicable.'),
             dcc.Checklist(id='incompletes',
                           value=[],
-                          labelStyle={'display': 'block'}),
+                          labelStyle={'display': 'inline-block'},
+                          style={'overflow': 'auto'}),
             html.Div('Select Fault'),
             dcc.Dropdown(id='faults',
                          placeholder='Select Faults',
@@ -439,6 +446,27 @@ def return_well_options_from_crb(pool, crb):
     return _options(well_names)
 
 
+# EXPERIMENT TO AUTO PLOT ALL WELLS IN A CRB -JS ON 10/1
+@app.callback(
+    Output('wells', 'value'),
+    [Input('crb', 'value'),
+     Input('crbc', 'value'),
+     Input('wells', 'options')]
+)
+def return_well_value_from_crb(crb, crbc, wells_options):
+    if crb and crbc:
+        return [d['value'] for d in wells_options]
+    else:
+        pass
+        #return [] #wells_value
+
+    #df = WELLCOMP[WELLCOMP['new_pool_desc'].str.contains(pool)]
+    #if crb:
+    #   df = df[df['cut_bk'].isin(crb)]
+    #well_names = df['REDRILL_WELL_NAME'].str.strip().unique()
+    #return _options(well_names)
+
+
 # Provide checklist of incomplete wells
 @app.callback(
     Output('incompletes', 'options'),
@@ -446,6 +474,8 @@ def return_well_options_from_crb(pool, crb):
     [State('incompletes', 'value')]
 )
 def return_incomplete_wells(well_selection, incompletes):
+    if not well_selection:
+        return []
     well_keys = list(set([i[:4] for i in well_selection]))
     compl_df = WELLBORE[WELLBORE['wellkey'].isin(well_keys)]
     compl_df = compl_df.loc[compl_df['comp_flag'] == 0]
@@ -466,7 +496,7 @@ def return_incomplete_wells(well_selection, incompletes):
      State('surface viz', 'figure')]
 )
 def update_3d_graph(well_names, incomplete_wells, fault, subsurface, surface):
-    if well_names == 'STARTUP':
+    if well_names == 'STARTUP' or not well_names:
         "Already rendered above, then well_names gets a value"
         pass
     else:
