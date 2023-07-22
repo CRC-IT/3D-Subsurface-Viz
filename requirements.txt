@@ -19,7 +19,7 @@ itsdangerous==1.1.0
 jdcal==1.4.1
 Jinja2==2.10.1
 jsonschema==3.0.1
-jupyter-core==4.4.0
+jupyter-core==4.11.2
 MarkupSafe==1.1.1
 nbformat==4.4.0
 numpy==1.16.4
